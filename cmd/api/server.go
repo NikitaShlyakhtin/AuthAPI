@@ -11,6 +11,11 @@ func (app *application) serve() error {
 		Handler: app.routes(),
 	}
 
+	app.logger.PrintInfo("starting server", map[string]string{
+		"addr": srv.Addr,
+		"env":  app.config.env,
+	})
+
 	err := srv.ListenAndServe()
 	if err != nil {
 		return err
