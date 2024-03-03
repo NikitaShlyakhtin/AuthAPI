@@ -23,8 +23,9 @@ type password struct {
 }
 
 var (
-	ErrDuplicateEmail    = errors.New("duplicate email")
-	ErrDuplicateUsername = errors.New("duplicate username")
+	ErrDuplicateEmail     = errors.New("duplicate email")
+	ErrDuplicateUsername  = errors.New("duplicate username")
+	ErrInvalidCredentials = errors.New("invalid credentials")
 )
 
 type UserModel struct {
@@ -32,17 +33,27 @@ type UserModel struct {
 }
 
 func ValidateUser(v *validator.Validator, user *User) {
-	v.Check(len(user.Username) > 0, "username", "must be provided")
-	v.Check(len(user.Username) <= 50, "username", "must not be more than 100 bytes long")
-
-	v.Check(len(user.Email) > 0, "email", "must be provided")
-	v.Check(len(user.Email) <= 100, "email", "must not be more than 100 bytes long")
-
-	v.Check(user.Password.plaintext != nil, "password", "must be provided")
-	v.Check(len(*user.Password.plaintext) >= 8, "password", "must be at least 8 bytes long")
+	ValidateUsername(v, user.Username)
+	ValidateEmail(v, user.Email)
+	ValidatePassword(v, *user.Password.plaintext)
 }
 
-func (p *password) Set(plaintext string) error {
+func ValidateUsername(v *validator.Validator, username string) {
+	v.Check(username != "", "username", "must be provided")
+	v.Check(len(username) <= 50, "username", "must not be more than 50 bytes long")
+}
+
+func ValidatePassword(v *validator.Validator, password string) {
+	v.Check(password != "", "password", "must be provided")
+	v.Check(len(password) >= 8, "password", "must be at least 8 bytes long")
+}
+
+func ValidateEmail(v *validator.Validator, email string) {
+	v.Check(email != "", "email", "must be provided")
+	v.Check(len(email) <= 100, "email", "must not be more than 100 bytes long")
+}
+
+func (p *password) SetAndHash(plaintext string) error {
 	hash, err := bcrypt.GenerateFromPassword([]byte(plaintext), 12)
 	if err != nil {
 		return err
@@ -52,6 +63,10 @@ func (p *password) Set(plaintext string) error {
 	p.hash = hash
 
 	return nil
+}
+
+func (p *password) Set(plaintext string) {
+	p.plaintext = &plaintext
 }
 
 func (m UserModel) Insert(user *User) error {
@@ -76,6 +91,40 @@ func (m UserModel) Insert(user *User) error {
 			return err
 		}
 	}
+
+	return nil
+}
+
+func (m UserModel) Authenticate(user *User) error {
+	var user_id int64
+	var email string
+	var hash string
+
+	query := `
+		SELECT user_id, email, password_hash
+		FROM users
+		WHERE username = $1
+	`
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	err := m.DB.QueryRowContext(ctx, query, user.Username).Scan(&user_id, &email, &hash)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrInvalidCredentials
+		} else {
+			return err
+		}
+	}
+
+	err = bcrypt.CompareHashAndPassword([]byte(hash), []byte(*user.Password.plaintext))
+	if err != nil {
+		return ErrInvalidCredentials
+	}
+
+	user.ID = user_id
+	user.Email = email
 
 	return nil
 }

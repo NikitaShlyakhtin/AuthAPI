@@ -8,4 +8,4 @@ include .envrc
 ## run/api: run the cmd/auth application
 .PHONY: run/api
 run/api:
-	go run ./cmd/api -db-dsn=${DB_DSN}
+	go run ./cmd/api -db-dsn=${DB_DSN} -jwt-secret=${JWT_SECRET}

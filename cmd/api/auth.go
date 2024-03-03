@@ -27,7 +27,7 @@ func (app *application) registerHandler(ctx *gin.Context) {
 		Email:    input.Email,
 	}
 
-	err = user.Password.Set(input.Password)
+	err = user.Password.SetAndHash(input.Password)
 	if err != nil {
 		app.serverErrorResponse(ctx, err)
 		return
@@ -58,7 +58,42 @@ func (app *application) registerHandler(ctx *gin.Context) {
 	ctx.JSON(http.StatusAccepted, gin.H{"message": "user account created"})
 }
 
-func (app *application) loginHandler(ctx *gin.Context) {}
+func (app *application) loginHandler(ctx *gin.Context) {
+	var input struct {
+		Username string `json:"username" binding:"required"`
+		Password string `json:"password" binding:"required"`
+	}
+
+	err := ctx.ShouldBindJSON(&input)
+	if err != nil {
+		app.badRequestResponse(ctx, err)
+		return
+	}
+
+	user := &data.User{
+		Username: input.Username,
+	}
+	user.Password.Set(input.Password)
+
+	err = app.models.Users.Authenticate(user)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrInvalidCredentials):
+			app.invalidCredentialsResponse(ctx)
+		default:
+			app.serverErrorResponse(ctx, err)
+		}
+		return
+	}
+
+	tokens, err := app.models.Tokens.GenerateNewPair(*user, app.config.jwt.secret, app.config.jwt.accessExpiry, app.config.jwt.refreshExpiry)
+	if err != nil {
+		app.serverErrorResponse(ctx, err)
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"tokens": tokens})
+}
 
 func (app *application) logoutHandler(ctx *gin.Context) {}
 
