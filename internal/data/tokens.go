@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
+	"errors"
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
@@ -19,6 +20,10 @@ type Tokens struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
 }
+
+var (
+	ErrTokenExpired = errors.New("token has expired")
+)
 
 func (m TokenModel) GenerateNewPair(user User, secret string, accessExpiry, refreshExpiry time.Duration) (Tokens, error) {
 	var tokens Tokens
@@ -72,4 +77,24 @@ func (m TokenModel) GenerateNewPair(user User, secret string, accessExpiry, refr
 	}
 
 	return tokens, nil
+}
+
+func ParseAccessToken(accessToken string, secret string) (*jwt.Token, error) {
+	token, err := jwt.Parse(accessToken, func(token *jwt.Token) (interface{}, error) {
+		_, ok := token.Method.(*jwt.SigningMethodHMAC)
+		if !ok {
+			return nil, jwt.ErrSignatureInvalid
+		}
+		return []byte(secret), nil
+	})
+	if err != nil {
+		switch {
+		case err.(*jwt.ValidationError).Errors == jwt.ValidationErrorExpired:
+			return nil, ErrTokenExpired
+		default:
+			return nil, err
+		}
+	}
+
+	return token, nil
 }

@@ -45,18 +45,17 @@ func (app *application) failedValidationResponse(ctx *gin.Context, errors map[st
 	app.errorResponse(ctx, http.StatusUnprocessableEntity, errors)
 }
 
-func (app *application) rateLimitExceededResponse(ctx *gin.Context) {
-	message := "rate limit exceeded"
-	app.errorResponse(ctx, http.StatusTooManyRequests, message)
-}
-
 func (app *application) invalidCredentialsResponse(ctx *gin.Context) {
 	message := "invalid authentication credentials"
 	app.errorResponse(ctx, http.StatusUnauthorized, message)
 }
 
-func (app *application) invalidAuthenticationTokenResponse(ctx *gin.Context) {
-	ctx.Writer.Header().Set("WWW-Authenticate", "Bearer")
-	message := "invalid or missing authentication token"
+func (app *application) invalidTokenResponse(ctx *gin.Context) {
+	message := "the token provided is not valid"
+	app.errorResponse(ctx, http.StatusUnauthorized, message)
+}
+
+func (app *application) tokenExpiredResponse(ctx *gin.Context) {
+	message := "the token provided has expired"
 	app.errorResponse(ctx, http.StatusUnauthorized, message)
 }

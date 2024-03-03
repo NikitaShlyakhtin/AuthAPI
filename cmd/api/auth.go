@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/dgrijalva/jwt-go"
 	"github.com/gin-gonic/gin"
 )
 
@@ -99,6 +100,36 @@ func (app *application) logoutHandler(ctx *gin.Context) {}
 
 func (app *application) refreshHandler(ctx *gin.Context) {}
 
-func (app *application) verifyHandler(ctx *gin.Context) {}
+func (app *application) verifyHandler(ctx *gin.Context) {
+	var input struct {
+		AccessToken string `json:"access_token" binding:"required"`
+	}
+
+	err := ctx.ShouldBindJSON(&input)
+	if err != nil {
+		app.badRequestResponse(ctx, err)
+		return
+	}
+
+	token, err := data.ParseAccessToken(input.AccessToken, app.config.jwt.secret)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrTokenExpired):
+			app.tokenExpiredResponse(ctx)
+		default:
+			app.serverErrorResponse(ctx, err)
+		}
+		return
+	}
+
+	if !token.Valid {
+		app.invalidTokenResponse(ctx)
+		return
+	}
+
+	claims := token.Claims.(jwt.MapClaims)
+
+	ctx.JSON(http.StatusOK, gin.H{"claims": claims})
+}
 
 func (app *application) getProfileHandler(ctx *gin.Context) {}
