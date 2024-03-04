@@ -18,7 +18,12 @@ type config struct {
 	db   struct {
 		dsn string
 	}
-	jwt data.TokenConfig
+	jwt     data.TokenConfig
+	limiter struct {
+		rps     float64
+		burst   int
+		enabled bool
+	}
 }
 
 type application struct {
@@ -40,6 +45,10 @@ func main() {
 	flag.DurationVar(&cfg.jwt.RefreshExpiry, "jwt-refresh-expiry", time.Hour*24*7, "JWT refresh token expiry")
 	flag.StringVar(&cfg.jwt.RefreshSecret, "jwt-refresh-secret", "", "JWT refresh secret key")
 	flag.IntVar(&cfg.jwt.RefreshLength, "jwt-refresh-length", 64, "JWT refresh token length")
+
+	flag.Float64Var(&cfg.limiter.rps, "limiter-rps", 2, "Rate limiter maximum requests per second")
+	flag.IntVar(&cfg.limiter.burst, "limiter-burst", 4, "Rate limiter burst")
+	flag.BoolVar(&cfg.limiter.enabled, "limiter-enabled", false, "Enable rate limiter")
 
 	flag.Parse()
 

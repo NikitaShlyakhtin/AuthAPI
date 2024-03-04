@@ -59,3 +59,8 @@ func (app *application) tokenExpiredResponse(ctx *gin.Context) {
 	message := "the token provided has expired"
 	app.errorResponse(ctx, http.StatusUnauthorized, message)
 }
+
+func (app *application) rateLimitExceededResponse(ctx *gin.Context) {
+	message := "rate limit exceeded"
+	app.errorResponse(ctx, http.StatusTooManyRequests, message)
+}
