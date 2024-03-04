@@ -12,7 +12,6 @@ func (app *application) routes() *gin.Engine {
 	router.NoRoute(app.notFoundResponse)
 
 	router.POST("/auth/register", app.registerHandler)
-	router.GET("/auth/profile", app.getProfileHandler)
 	router.POST("/auth/login", app.loginHandler)
 	router.POST("/auth/logout", app.logoutHandler)
 	router.POST("/auth/refresh", app.refreshHandler)

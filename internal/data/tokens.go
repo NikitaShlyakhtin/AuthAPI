@@ -2,14 +2,16 @@ package data
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
-	"golang.org/x/crypto/bcrypt"
 )
 
 type TokenModel struct {
@@ -21,22 +23,29 @@ type Tokens struct {
 	RefreshToken string `json:"refresh_token"`
 }
 
+type TokenConfig struct {
+	AccessSecret  string
+	RefreshSecret string
+	AccessExpiry  time.Duration
+	RefreshExpiry time.Duration
+}
+
 var (
 	ErrTokenExpired = errors.New("token has expired")
 )
 
-func (m TokenModel) GenerateNewPair(user User, secret string, accessExpiry, refreshExpiry time.Duration) (Tokens, error) {
+func (m TokenModel) GenerateNewPair(user User, cfg TokenConfig) (Tokens, error) {
 	var tokens Tokens
 
 	claims := &jwt.MapClaims{
 		"sub":      user.ID,
-		"exp":      jwt.TimeFunc().Add(accessExpiry).Unix(),
+		"exp":      jwt.TimeFunc().Add(cfg.AccessExpiry).Unix(),
 		"username": user.Username,
 		"email":    user.Email,
 	}
 
 	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	ss, err := accessToken.SignedString([]byte(secret))
+	ss, err := accessToken.SignedString([]byte(cfg.AccessSecret))
 	if err != nil {
 		return tokens, err
 	}
@@ -50,10 +59,9 @@ func (m TokenModel) GenerateNewPair(user User, secret string, accessExpiry, refr
 	}
 
 	tokens.RefreshToken = base64.StdEncoding.EncodeToString(rb)
-	hashedRefreshToken, err := bcrypt.GenerateFromPassword([]byte(tokens.RefreshToken), 12)
-	if err != nil {
-		return tokens, err
-	}
+	mac := hmac.New(sha256.New, []byte(cfg.RefreshSecret))
+	mac.Write([]byte(tokens.RefreshToken))
+	hashedRefreshToken := hex.EncodeToString(mac.Sum(nil))
 
 	query := `
 		INSERT INTO
@@ -69,7 +77,7 @@ func (m TokenModel) GenerateNewPair(user User, secret string, accessExpiry, refr
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	args := []interface{}{user.ID, hashedRefreshToken, time.Now().Add(refreshExpiry)}
+	args := []interface{}{user.ID, hashedRefreshToken, time.Now().Add(cfg.RefreshExpiry)}
 
 	_, err = m.DB.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -97,4 +105,36 @@ func ParseAccessToken(accessToken string, secret string) (*jwt.Token, error) {
 	}
 
 	return token, nil
+}
+
+func (m TokenModel) Logout(refreshToken, refreshSecret string) error {
+	mac := hmac.New(sha256.New, []byte(refreshSecret))
+	mac.Write([]byte(refreshToken))
+	hashedRefreshToken := hex.EncodeToString(mac.Sum(nil))
+
+	query := `
+		DELETE FROM 
+			tokens
+		WHERE
+			refresh_token_hash = $1
+	`
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	result, err := m.DB.ExecContext(ctx, query, hashedRefreshToken)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rowsAffected == 0 {
+		return ErrRecordNotFound
+	}
+
+	return nil
 }

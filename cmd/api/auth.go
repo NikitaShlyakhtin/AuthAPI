@@ -87,7 +87,14 @@ func (app *application) loginHandler(ctx *gin.Context) {
 		return
 	}
 
-	tokens, err := app.models.Tokens.GenerateNewPair(*user, app.config.jwt.secret, app.config.jwt.accessExpiry, app.config.jwt.refreshExpiry)
+	tokenConfig := data.TokenConfig{
+		AccessSecret:  app.config.jwt.accessSecret,
+		RefreshSecret: app.config.jwt.refreshSecret,
+		AccessExpiry:  app.config.jwt.accessExpiry,
+		RefreshExpiry: app.config.jwt.refreshExpiry,
+	}
+
+	tokens, err := app.models.Tokens.GenerateNewPair(*user, tokenConfig)
 	if err != nil {
 		app.serverErrorResponse(ctx, err)
 		return
@@ -96,7 +103,30 @@ func (app *application) loginHandler(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"tokens": tokens})
 }
 
-func (app *application) logoutHandler(ctx *gin.Context) {}
+func (app *application) logoutHandler(ctx *gin.Context) {
+	var input struct {
+		RefreshToken string `json:"refresh_token" binding:"required"`
+	}
+
+	err := ctx.ShouldBindJSON(&input)
+	if err != nil {
+		app.badRequestResponse(ctx, err)
+		return
+	}
+
+	err = app.models.Tokens.Logout(input.RefreshToken, app.config.jwt.refreshSecret)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrRecordNotFound):
+			app.invalidTokenResponse(ctx)
+		default:
+			app.serverErrorResponse(ctx, err)
+		}
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "refresh token revoked"})
+}
 
 func (app *application) refreshHandler(ctx *gin.Context) {}
 
@@ -111,7 +141,7 @@ func (app *application) verifyHandler(ctx *gin.Context) {
 		return
 	}
 
-	token, err := data.ParseAccessToken(input.AccessToken, app.config.jwt.secret)
+	token, err := data.ParseAccessToken(input.AccessToken, app.config.jwt.accessSecret)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrTokenExpired):
@@ -131,5 +161,3 @@ func (app *application) verifyHandler(ctx *gin.Context) {
 
 	ctx.JSON(http.StatusOK, gin.H{"claims": claims})
 }
-
-func (app *application) getProfileHandler(ctx *gin.Context) {}
