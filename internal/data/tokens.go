@@ -139,15 +139,39 @@ func (m TokenModel) Logout(refreshToken, refreshSecret string) error {
 		return err
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
 	query := `
-		DELETE FROM 
+		SELECT
+			expires < NOW() AS has_expired
+		FROM 
 			tokens
 		WHERE
 			refresh_token_hash = $1
 	`
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
+	var hasExpired bool
+	err = m.DB.QueryRowContext(ctx, query, hashedRefreshToken).Scan(&hasExpired)
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return ErrRecordNotFound
+		default:
+			return err
+		}
+	}
+
+	if hasExpired {
+		return ErrTokenExpired
+	}
+
+	query = `
+		DELETE FROM 
+			tokens
+		WHERE
+			refresh_token_hash = $1
+	`
 
 	result, err := m.DB.ExecContext(ctx, query, hashedRefreshToken)
 	if err != nil {
@@ -164,4 +188,51 @@ func (m TokenModel) Logout(refreshToken, refreshSecret string) error {
 	}
 
 	return nil
+}
+
+func (m TokenModel) VerifyRefreshToken(token, secret string) (User, error) {
+	var user User
+	var hasExpired bool
+
+	query := `
+		SELECT 
+			users.user_id,
+			username,
+			email,
+			CASE 
+				WHEN 
+					tokens.expires < NOW() THEN TRUE 
+				ELSE FALSE 
+			END AS has_expired
+		FROM
+			users
+		JOIN
+			tokens ON users.user_id = tokens.user_id
+		WHERE
+			refresh_token_hash = $1
+	`
+
+	hashedRefreshToken, err := HashRefreshToken(token, secret)
+	if err != nil {
+		return user, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	err = m.DB.QueryRowContext(ctx, query, hashedRefreshToken).Scan(&user.ID, &user.Username, &user.Email, &hasExpired)
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return user, ErrRecordNotFound
+		default:
+			return user, err
+		}
+	}
+
+	if hasExpired {
+		return user, ErrTokenExpired
+	}
+
+	return user, nil
 }

@@ -128,7 +128,45 @@ func (app *application) logoutHandler(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "refresh token revoked"})
 }
 
-func (app *application) refreshHandler(ctx *gin.Context) {}
+func (app *application) refreshHandler(ctx *gin.Context) {
+	var input struct {
+		RefreshToken string `json:"refresh_token" binding:"required"`
+	}
+
+	err := ctx.ShouldBindJSON(&input)
+	if err != nil {
+		app.badRequestResponse(ctx, err)
+		return
+	}
+
+	user, err := app.models.Tokens.VerifyRefreshToken(input.RefreshToken, app.config.jwt.refreshSecret)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrRecordNotFound):
+			app.invalidTokenResponse(ctx)
+		case errors.Is(err, data.ErrTokenExpired):
+			app.tokenExpiredResponse(ctx)
+		default:
+			app.serverErrorResponse(ctx, err)
+		}
+		return
+	}
+
+	tokenConfig := data.TokenConfig{
+		AccessSecret:  app.config.jwt.accessSecret,
+		AccessExpiry:  app.config.jwt.accessExpiry,
+		RefreshSecret: app.config.jwt.refreshSecret,
+		RefreshExpiry: app.config.jwt.refreshExpiry,
+	}
+
+	tokens, err := app.models.Tokens.GenerateNewPair(user, tokenConfig)
+	if err != nil {
+		app.serverErrorResponse(ctx, err)
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"tokens": tokens})
+}
 
 func (app *application) verifyHandler(ctx *gin.Context) {
 	var input struct {
