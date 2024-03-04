@@ -7,7 +7,6 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"time"
 
@@ -44,24 +43,24 @@ func (m TokenModel) GenerateNewPair(user User, cfg TokenConfig) (Tokens, error) 
 		"email":    user.Email,
 	}
 
-	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	ss, err := accessToken.SignedString([]byte(cfg.AccessSecret))
+	accessToken, err := GenerateAccessToken(cfg.AccessSecret, claims)
 	if err != nil {
 		return tokens, err
 	}
 
-	tokens.AccessToken = ss
+	tokens.AccessToken = accessToken
 
-	rb := make([]byte, 32)
-	_, err = rand.Read(rb)
+	refreshToken, err := GenerateRefreshToken()
 	if err != nil {
 		return tokens, err
 	}
 
-	tokens.RefreshToken = base64.StdEncoding.EncodeToString(rb)
-	mac := hmac.New(sha256.New, []byte(cfg.RefreshSecret))
-	mac.Write([]byte(tokens.RefreshToken))
-	hashedRefreshToken := hex.EncodeToString(mac.Sum(nil))
+	tokens.RefreshToken = refreshToken
+
+	hashedRefreshToken, err := HashRefreshToken(refreshToken, cfg.RefreshSecret)
+	if err != nil {
+		return tokens, err
+	}
 
 	query := `
 		INSERT INTO
@@ -87,6 +86,33 @@ func (m TokenModel) GenerateNewPair(user User, cfg TokenConfig) (Tokens, error) 
 	return tokens, nil
 }
 
+func GenerateAccessToken(secret string, claims jwt.Claims) (string, error) {
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	ss, err := token.SignedString([]byte(secret))
+	if err != nil {
+		return "", err
+	}
+
+	return ss, nil
+}
+
+func GenerateRefreshToken() (string, error) {
+	rb := make([]byte, 32)
+	_, err := rand.Read(rb)
+	if err != nil {
+		return "", err
+	}
+
+	return base64.StdEncoding.EncodeToString(rb), nil
+}
+
+func HashRefreshToken(token, secret string) (string, error) {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(token))
+
+	return base64.StdEncoding.EncodeToString(mac.Sum(nil)), nil
+}
+
 func ParseAccessToken(accessToken string, secret string) (*jwt.Token, error) {
 	token, err := jwt.Parse(accessToken, func(token *jwt.Token) (interface{}, error) {
 		_, ok := token.Method.(*jwt.SigningMethodHMAC)
@@ -108,9 +134,10 @@ func ParseAccessToken(accessToken string, secret string) (*jwt.Token, error) {
 }
 
 func (m TokenModel) Logout(refreshToken, refreshSecret string) error {
-	mac := hmac.New(sha256.New, []byte(refreshSecret))
-	mac.Write([]byte(refreshToken))
-	hashedRefreshToken := hex.EncodeToString(mac.Sum(nil))
+	hashedRefreshToken, err := HashRefreshToken(refreshToken, refreshSecret)
+	if err != nil {
+		return err
+	}
 
 	query := `
 		DELETE FROM 
