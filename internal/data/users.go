@@ -6,21 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"time"
-
-	"golang.org/x/crypto/bcrypt"
 )
-
-type User struct {
-	ID       int64    `json:"user_id"`
-	Username string   `json:"username"`
-	Email    string   `json:"email"`
-	Password password `json:"-"`
-}
-
-type password struct {
-	plaintext *string
-	hash      []byte
-}
 
 var (
 	ErrDuplicateEmail     = errors.New("duplicate email")
@@ -32,41 +18,30 @@ type UserModel struct {
 	DB *sql.DB
 }
 
+type User struct {
+	ID       int64    `json:"user_id"`
+	Username string   `json:"username"`
+	Email    string   `json:"email"`
+	Password password `json:"-"`
+}
+
 func ValidateUser(v *validator.Validator, user *User) {
 	ValidateUsername(v, user.Username)
 	ValidateEmail(v, user.Email)
 	ValidatePassword(v, *user.Password.plaintext)
 }
 
+func ValidateLoginCredentials(v *validator.Validator, user *User) {
+	ValidateUsername(v, user.Username)
+	ValidatePassword(v, *user.Password.plaintext)
+}
+
 func ValidateUsername(v *validator.Validator, username string) {
-	v.Check(username != "", "username", "must be provided")
 	v.Check(len(username) <= 50, "username", "must not be more than 50 bytes long")
 }
 
-func ValidatePassword(v *validator.Validator, password string) {
-	v.Check(password != "", "password", "must be provided")
-	v.Check(len(password) >= 8, "password", "must be at least 8 bytes long")
-}
-
 func ValidateEmail(v *validator.Validator, email string) {
-	v.Check(email != "", "email", "must be provided")
 	v.Check(len(email) <= 100, "email", "must not be more than 100 bytes long")
-}
-
-func (p *password) SetAndHash(plaintext string) error {
-	hash, err := bcrypt.GenerateFromPassword([]byte(plaintext), 12)
-	if err != nil {
-		return err
-	}
-
-	p.plaintext = &plaintext
-	p.hash = hash
-
-	return nil
-}
-
-func (p *password) Set(plaintext string) {
-	p.plaintext = &plaintext
 }
 
 func (m UserModel) Insert(user *User) error {
@@ -95,7 +70,7 @@ func (m UserModel) Insert(user *User) error {
 	return nil
 }
 
-func (m UserModel) Authenticate(user *User) error {
+func (m UserModel) Login(user *User) error {
 	var user_id int64
 	var email string
 	var hash string
@@ -118,7 +93,7 @@ func (m UserModel) Authenticate(user *User) error {
 		}
 	}
 
-	err = bcrypt.CompareHashAndPassword([]byte(hash), []byte(*user.Password.plaintext))
+	err = verifyPassword(*user.Password.plaintext, hash)
 	if err != nil {
 		return ErrInvalidCredentials
 	}

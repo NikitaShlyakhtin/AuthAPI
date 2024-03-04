@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/dgrijalva/jwt-go"
 	"github.com/gin-gonic/gin"
 )
 
@@ -76,7 +75,14 @@ func (app *application) loginHandler(ctx *gin.Context) {
 	}
 	user.Password.Set(input.Password)
 
-	err = app.models.Users.Authenticate(user)
+	v := validator.New()
+
+	if data.ValidateLoginCredentials(v, user); !v.Valid() {
+		app.failedValidationResponse(ctx, v.Errors)
+		return
+	}
+
+	err = app.models.Users.Login(user)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrInvalidCredentials):
@@ -87,14 +93,7 @@ func (app *application) loginHandler(ctx *gin.Context) {
 		return
 	}
 
-	tokenConfig := data.TokenConfig{
-		AccessSecret:  app.config.jwt.accessSecret,
-		RefreshSecret: app.config.jwt.refreshSecret,
-		AccessExpiry:  app.config.jwt.accessExpiry,
-		RefreshExpiry: app.config.jwt.refreshExpiry,
-	}
-
-	tokens, err := app.models.Tokens.GenerateNewPair(*user, tokenConfig)
+	tokens, err := app.GenerateNewPair(*user)
 	if err != nil {
 		app.serverErrorResponse(ctx, err)
 		return
@@ -114,7 +113,14 @@ func (app *application) logoutHandler(ctx *gin.Context) {
 		return
 	}
 
-	err = app.models.Tokens.Logout(input.RefreshToken, app.config.jwt.refreshSecret)
+	v := validator.New()
+
+	if data.ValidateRefreshToken(v, input.RefreshToken, app.config.jwt.RefreshLength); !v.Valid() {
+		app.failedValidationResponse(ctx, v.Errors)
+		return
+	}
+
+	err = app.RevokeToken(input.RefreshToken)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrRecordNotFound):
@@ -139,7 +145,14 @@ func (app *application) refreshHandler(ctx *gin.Context) {
 		return
 	}
 
-	user, err := app.models.Tokens.VerifyRefreshToken(input.RefreshToken, app.config.jwt.refreshSecret)
+	v := validator.New()
+
+	if data.ValidateRefreshToken(v, input.RefreshToken, app.config.jwt.RefreshLength); !v.Valid() {
+		app.failedValidationResponse(ctx, v.Errors)
+		return
+	}
+
+	tokens, err := app.RefreshToken(input.RefreshToken)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrRecordNotFound):
@@ -149,19 +162,6 @@ func (app *application) refreshHandler(ctx *gin.Context) {
 		default:
 			app.serverErrorResponse(ctx, err)
 		}
-		return
-	}
-
-	tokenConfig := data.TokenConfig{
-		AccessSecret:  app.config.jwt.accessSecret,
-		AccessExpiry:  app.config.jwt.accessExpiry,
-		RefreshSecret: app.config.jwt.refreshSecret,
-		RefreshExpiry: app.config.jwt.refreshExpiry,
-	}
-
-	tokens, err := app.models.Tokens.GenerateNewPair(user, tokenConfig)
-	if err != nil {
-		app.serverErrorResponse(ctx, err)
 		return
 	}
 
@@ -179,23 +179,18 @@ func (app *application) verifyHandler(ctx *gin.Context) {
 		return
 	}
 
-	token, err := data.ParseAccessToken(input.AccessToken, app.config.jwt.accessSecret)
+	claims, err := app.VerifyToken(input.AccessToken)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrTokenExpired):
 			app.tokenExpiredResponse(ctx)
+		case errors.Is(err, data.ErrTokenInvalid):
+			app.invalidTokenResponse(ctx)
 		default:
 			app.serverErrorResponse(ctx, err)
 		}
 		return
 	}
-
-	if !token.Valid {
-		app.invalidTokenResponse(ctx)
-		return
-	}
-
-	claims := token.Claims.(jwt.MapClaims)
 
 	ctx.JSON(http.StatusOK, gin.H{"claims": claims})
 }

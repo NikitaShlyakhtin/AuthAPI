@@ -18,12 +18,7 @@ type config struct {
 	db   struct {
 		dsn string
 	}
-	jwt struct {
-		accessSecret  string
-		refreshSecret string
-		accessExpiry  time.Duration
-		refreshExpiry time.Duration
-	}
+	jwt data.TokenConfig
 }
 
 type application struct {
@@ -40,10 +35,11 @@ func main() {
 
 	flag.StringVar(&cfg.db.dsn, "db-dsn", "", "PostgreSQL DSN")
 
-	flag.StringVar(&cfg.jwt.accessSecret, "jwt-access-secret", "", "JWT access secret key")
-	flag.StringVar(&cfg.jwt.refreshSecret, "jwt-refresh-secret", "", "JWT refresh secret key")
-	flag.DurationVar(&cfg.jwt.accessExpiry, "jwt-access-expiry", time.Minute*15, "JWT access token expiry")
-	flag.DurationVar(&cfg.jwt.refreshExpiry, "jwt-refresh-expiry", time.Hour*24*7, "JWT refresh token expiry")
+	flag.StringVar(&cfg.jwt.AccessSecret, "jwt-access-secret", "", "JWT access secret key")
+	flag.DurationVar(&cfg.jwt.AccessExpiry, "jwt-access-expiry", time.Minute*15, "JWT access token expiry")
+	flag.DurationVar(&cfg.jwt.RefreshExpiry, "jwt-refresh-expiry", time.Hour*24*7, "JWT refresh token expiry")
+	flag.StringVar(&cfg.jwt.RefreshSecret, "jwt-refresh-secret", "", "JWT refresh secret key")
+	flag.IntVar(&cfg.jwt.RefreshLength, "jwt-refresh-length", 64, "JWT refresh token length")
 
 	flag.Parse()
 
